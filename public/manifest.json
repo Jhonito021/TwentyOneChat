@@ -1,0 +1,13 @@
+{
+    "name": "TwentyOne Chat - Messagerie instantanée",
+    "short_tile": "TwetyOne Chat",
+    "description": "Application de messagerie instantanée",
+    "background_color": "#171717",
+    "display": "standalone",
+    "orientation": "portrait",
+    "scope": "/",
+    "start_url": "/",
+    "icons": [
+        
+    ]
+}
