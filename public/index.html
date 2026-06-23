@@ -18,7 +18,7 @@
   <title>Chat.</title>
 
   <!-- PWA Manifest -->
-  <link rel="manifest" href="/manifest.json" />
+  <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
 
   <!-- Font Awesome -->
@@ -81,7 +81,7 @@
 <body>
   <!-- Splash screen -->
   <div id="splash">
-    <div class="logo">Chat<span>.</span></div>
+    <div class="logo">21<span>Chat.</span></div>
     <div class="loader"></div>
   </div>
 
@@ -108,7 +108,7 @@
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker
-          .register("/service-worker.js")
+          .register("service-worker.js")
           .then((reg) => console.log("SW registered:", reg.scope))
           .catch((err) => console.warn("SW registration failed:", err));
       });
@@ -122,63 +122,5 @@
       }, 800);
     });
   </script>
-
-  <!-- ⚠️  SUPABASE SETUP GUIDE
-  ════════════════════════════════════════════════════════════════
-
-  1. Créez un projet sur https://supabase.com
-
-  2. Dans l'éditeur SQL, exécutez:
-
-  -- Table utilisateurs
-  create table users (
-    id uuid primary key default gen_random_uuid(),
-    name text not null,
-    avatar_url text,
-    status text default 'offline',
-    last_seen timestamptz,
-    created_at timestamptz default now()
-  );
-
-  -- Table messages
-  create table messages (
-    id uuid primary key default gen_random_uuid(),
-    conversation_id uuid not null,
-    sender_id uuid references users(id),
-    content text not null,
-    read boolean default false,
-    created_at timestamptz default now()
-  );
-
-  -- Table conversations
-  create table conversations (
-    id uuid primary key default gen_random_uuid(),
-    participant_a uuid references users(id),
-    participant_b uuid references users(id),
-    created_at timestamptz default now()
-  );
-
-  -- Activer Realtime
-  alter table messages replica identity full;
-  alter publication supabase_realtime add table messages;
-
-  -- Row Level Security
-  alter table messages enable row level security;
-  create policy "Users can read their messages"
-    on messages for select
-    using (auth.uid() = sender_id);
-
-  create policy "Users can insert messages"
-    on messages for insert
-    with check (auth.uid() = sender_id);
-
-  3. Dans chat-app.jsx, remplacez:
-     const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
-     const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
-
-  4. Activez Supabase Realtime dans:
-     Dashboard → Database → Replication → supabase_realtime
-
-  ════════════════════════════════════════════════════════════════ -->
 </body>
 </html>

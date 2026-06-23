@@ -1315,7 +1315,7 @@ export default function ChatApp() {
       {/* Sidebar */}
       <div className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}>
         <div className="sidebar-header">
-          <h1>Chat<span>.</span></h1>
+          <h1>21<span>Chat.</span></h1>
           <div className="header-actions">
             <button
               className={`icon-btn ${theme === "light" ? "active" : ""}`}
