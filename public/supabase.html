@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Supabase</title>
+</head>
+<body>
+  <h1>Test de connexion Supabase</h1>
+  <pre id="result">Test en cours...</pre>
+
+  <script>
+    const SUPABASE_URL = "https://oohtrnmnrybaxwopzdam.supabase.co";
+    const SUPABASE_ANON_KEY ="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vaHRybm1ucnliYXh3b3B6ZGFtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjIxMTkyNSwiZXhwIjoyMDk3Nzg3OTI1fQ.z4qXvP_4DkL1Nq58PN_luq98Q-Nr7XskzZGMiZDrNUQ";
+
+    async function testConnection() {
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+        
+        if (response.ok) {
+          document.getElementById('result').textContent = '✅ Connexion réussie !';
+        } else {
+          document.getElementById('result').textContent = `❌ Erreur: ${response.status} - ${response.statusText}`;
+        }
+      } catch (error) {
+        document.getElementById('result').textContent = `❌ Erreur: ${error.message}`;
+      }
+    }
+
+    testConnection();
+  </script>
+</body>
+</html>

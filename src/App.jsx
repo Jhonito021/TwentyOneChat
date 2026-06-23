@@ -1,56 +1,160 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import './App.css'; // CSS importé séparément
+import { createClient } from '@supabase/supabase-js';
+import './App.css';
 
-// ─── Configuration ──────────────────────────────────────────────────────────
-// ⚠️ Remplacez ces valeurs par celles de votre projet Supabase
-const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+// ─── Configuration Supabase ──────────────────────────────────────────────────
+const SUPABASE_URL = "https://oohtrnmnrybaxwopzdam.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vaHRybm1ucnliYXh3b3B6ZGFtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjIxMTkyNSwiZXhwIjoyMDk3Nzg3OTI1fQ.z4qXvP_4DkL1Nq58PN_luq98Q-Nr7XskzZGMiZDrNUQ";
 
-// ─── Client Supabase (optionnel) ─────────────────────────────────────────────
-// Décommentez pour utiliser Supabase
-// import { createClient } from '@supabase/supabase-js';
-// const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// ─── Mock data pour démonstration ─────────────────────────────────────────────
-const MOCK_CONTACTS = [
-  { id: "1", name: "Alice Martin", avatar: null, status: "online", last_seen: null },
-  { id: "2", name: "Bob Dupont", avatar: null, status: "offline", last_seen: "Il y a 5 min" },
-  { id: "3", name: "Clara Petit", avatar: null, status: "online", last_seen: null },
-  { id: "4", name: "David Moreau", avatar: null, status: "away", last_seen: "Il y a 1h" },
-  { id: "5", name: "Emma Bernard", avatar: null, status: "offline", last_seen: "Hier" },
-];
-
-const MOCK_MESSAGES = {
-  "1": [
-    { id: "m1", content: "Salut ! Comment ça va ? 😊", sender_id: "1", created_at: new Date(Date.now() - 3600000).toISOString(), read: true },
-    { id: "m2", content: "Très bien merci ! Et toi ?", sender_id: "me", created_at: new Date(Date.now() - 3500000).toISOString(), read: true },
-    { id: "m3", content: "Super ! T'as vu le nouveau projet ?", sender_id: "1", created_at: new Date(Date.now() - 3400000).toISOString(), read: true },
-    { id: "m4", content: "Pas encore, tu m'envoies le lien ?", sender_id: "me", created_at: new Date(Date.now() - 300000).toISOString(), read: true },
-    { id: "m5", content: "Bien sûr, je te l'envoie de suite ! 🚀", sender_id: "1", created_at: new Date(Date.now() - 60000).toISOString(), read: false },
-  ],
-  "2": [
-    { id: "m6", content: "Hey, t'es dispo demain ?", sender_id: "2", created_at: new Date(Date.now() - 86400000).toISOString(), read: true },
-    { id: "m7", content: "Oui, après 14h c'est bon !", sender_id: "me", created_at: new Date(Date.now() - 82800000).toISOString(), read: true },
-  ],
-  "3": [
-    { id: "m8", content: "La réunion est annulée 🎉", sender_id: "3", created_at: new Date(Date.now() - 1800000).toISOString(), read: false },
-  ],
-  "4": [],
-  "5": [
-    { id: "m9", content: "Bon week-end !", sender_id: "5", created_at: new Date(Date.now() - 172800000).toISOString(), read: true },
-    { id: "m10", content: "Merci, toi aussi ! 😄", sender_id: "me", created_at: new Date(Date.now() - 172700000).toISOString(), read: true },
-  ],
-};
+// Initialisation du client Supabase
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ─── Emojis ───────────────────────────────────────────────────────────────────
 const EMOJIS = ["😀","😂","😊","😍","🥰","😎","🤔","😅","🙏","👍","❤️","🔥","✨","🎉","🚀","💯","😭","😤","🤣","😇","😋","🤗","😏","😬","🤩","😴","🥳","💪","👏","🙌"];
 
+// ─── IndexedDB ──────────────────────────────────────────────────────────────
+const DB_NAME = 'ChatAppDB';
+const DB_VERSION = 2;
+const STORES = {
+  USERS: 'users',
+  MESSAGES: 'messages',
+  CONVERSATIONS: 'conversations',
+  SESSION: 'session',
+  PENDING_MESSAGES: 'pending_messages'
+};
+
+class OfflineDB {
+  constructor() {
+    this.db = null;
+    this.isOpen = false;
+  }
+
+  async open() {
+    if (this.isOpen) return this.db;
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        this.isOpen = true;
+        resolve(this.db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        
+        if (!db.objectStoreNames.contains(STORES.USERS)) {
+          db.createObjectStore(STORES.USERS, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORES.MESSAGES)) {
+          db.createObjectStore(STORES.MESSAGES, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORES.CONVERSATIONS)) {
+          db.createObjectStore(STORES.CONVERSATIONS, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORES.SESSION)) {
+          db.createObjectStore(STORES.SESSION, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORES.PENDING_MESSAGES)) {
+          db.createObjectStore(STORES.PENDING_MESSAGES, { keyPath: 'id' });
+        }
+      };
+    });
+  }
+
+  async get(storeName, id) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getAll(storeName) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async put(storeName, data) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.put(data);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async delete(storeName, id) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async clear(storeName) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async batchPut(storeName, items) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      
+      let completed = 0;
+      const total = items.length;
+      
+      if (total === 0) {
+        resolve();
+        return;
+      }
+
+      items.forEach((item) => {
+        const request = store.put(item);
+        request.onsuccess = () => {
+          completed++;
+          if (completed === total) resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    });
+  }
+}
+
+const offlineDB = new OfflineDB();
+
 // ─── Utilitaires ───────────────────────────────────────────────────────────────
 function getInitials(name) {
+  if (!name) return '?';
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 }
 
 function formatTime(iso) {
+  if (!iso) return '';
   const d = new Date(iso);
   const now = new Date();
   const diff = now - d;
@@ -60,6 +164,7 @@ function formatTime(iso) {
 }
 
 function formatDateSeparator(iso) {
+  if (!iso) return '';
   const d = new Date(iso);
   const now = new Date();
   const diff = now - d;
@@ -84,9 +189,19 @@ function groupByDate(messages) {
 
 // ─── Composant principal ──────────────────────────────────────────────────────
 export default function ChatApp() {
+  // ─── Auth State ────────────────────────────────────────────────────────────
+  const [authMode, setAuthMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // ─── App State ─────────────────────────────────────────────────────────────
   const [theme, setTheme] = useState("dark");
-  const [contacts] = useState(MOCK_CONTACTS);
-  const [messages, setMessages] = useState(MOCK_MESSAGES);
+  const [contacts, setContacts] = useState([]);
+  const [messages, setMessages] = useState({});
   const [activeContact, setActiveContact] = useState(null);
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
@@ -96,29 +211,804 @@ export default function ChatApp() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncStatus, setSyncStatus] = useState('idle');
+  const [pendingMessages, setPendingMessages] = useState([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newAvatar, setNewAvatar] = useState('');
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const messagesAreaRef = useRef(null);
   const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
 
-  // PWA install
+  // ─── Gestion de la connexion réseau ──────────────────────────────────────
   useEffect(() => {
-    const handler = (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-      setShowInstallBanner(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncPendingMessages();
     };
-    window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
-  // Appliquer le thème
+  // ─── Vérification de session au chargement ──────────────────────────────
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
+    const checkSession = async () => {
+      try {
+        const session = await offlineDB.get(STORES.SESSION, 'session');
+        
+        if (session && session.user) {
+          setCurrentUser(session.user);
+          setIsAuthenticated(true);
+          await loadOfflineData();
+          setLoading(false);
+          
+          if (isOnline) {
+            try {
+              const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+              if (supabaseSession) {
+                setCurrentUser(supabaseSession.user);
+                await ensureUserExists(supabaseSession.user);
+              } else {
+                await logout();
+              }
+            } catch (e) {
+              console.log('Session Supabase expirée, utilisation du cache');
+            }
+          }
+          return;
+        }
 
-  // Scroll to bottom
+        if (isOnline) {
+          try {
+            const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+            if (supabaseSession) {
+              setCurrentUser(supabaseSession.user);
+              setIsAuthenticated(true);
+              await ensureUserExists(supabaseSession.user);
+              await offlineDB.put(STORES.SESSION, { id: 'session', user: supabaseSession.user });
+              setLoading(false);
+              return;
+            }
+          } catch (e) {
+            console.log('Pas de session active');
+          }
+        }
+
+        setIsAuthenticated(false);
+        setLoading(false);
+      } catch (error) {
+        console.error("Erreur vérification session:", error);
+        setIsAuthenticated(false);
+        setLoading(false);
+      }
+    };
+
+    checkSession();
+  }, [isOnline]);
+
+  // ─── Charger le profil utilisateur ────────────────────────────────────────
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      if (!currentUser) return;
+
+      try {
+        if (isOnline) {
+          const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', currentUser.id)
+            .single();
+
+          if (error) throw error;
+          if (data) {
+            setUserProfile(data);
+            await offlineDB.put(STORES.USERS, data);
+          }
+        } else {
+          const cached = await offlineDB.get(STORES.USERS, currentUser.id);
+          if (cached) setUserProfile(cached);
+        }
+      } catch (error) {
+        console.error("Erreur chargement profil:", error);
+      }
+    };
+
+    loadUserProfile();
+  }, [currentUser, isOnline]);
+
+  // ─── Fonction d'inscription ──────────────────────────────────────────────
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      if (!email || !password || !username) {
+        throw new Error('Tous les champs sont requis');
+      }
+
+      if (password.length < 6) {
+        throw new Error('Le mot de passe doit contenir au moins 6 caractères');
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: username
+          }
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        await ensureUserExists(data.user);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user });
+        setAuthLoading(false);
+        setEmail('');
+        setPassword('');
+        setUsername('');
+      }
+    } catch (error) {
+      setAuthError(error.message);
+      setAuthLoading(false);
+    }
+  };
+
+  // ─── Fonction de connexion ───────────────────────────────────────────────
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      if (!email || !password) {
+        throw new Error('Email et mot de passe requis');
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        await ensureUserExists(data.user);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user });
+        setAuthLoading(false);
+        setEmail('');
+        setPassword('');
+      }
+    } catch (error) {
+      setAuthError(error.message);
+      setAuthLoading(false);
+    }
+  };
+
+  // ─── Fonction de déconnexion ─────────────────────────────────────────────
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setUserProfile(null);
+      setContacts([]);
+      setMessages({});
+      setActiveContact(null);
+      await offlineDB.clear(STORES.SESSION);
+      await offlineDB.clear(STORES.MESSAGES);
+      await offlineDB.clear(STORES.CONVERSATIONS);
+      await offlineDB.clear(STORES.PENDING_MESSAGES);
+    } catch (error) {
+      console.error("Erreur déconnexion:", error);
+    }
+  };
+
+  // ─── Mettre à jour le profil ─────────────────────────────────────────────
+  const updateProfile = async () => {
+    if (!currentUser || !userProfile) return;
+
+    try {
+      setEditingProfile(true);
+
+      const updates = {};
+      if (newUsername && newUsername !== userProfile.name) {
+        updates.name = newUsername;
+      }
+      if (newAvatar !== undefined && newAvatar !== userProfile.avatar_url) {
+        updates.avatar_url = newAvatar || null;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        setEditingProfile(false);
+        return;
+      }
+
+      if (isOnline) {
+        const { data, error } = await supabase
+          .from('users')
+          .update(updates)
+          .eq('id', currentUser.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setUserProfile(data);
+          await offlineDB.put(STORES.USERS, data);
+        }
+      } else {
+        // Mise à jour hors ligne
+        const updated = { ...userProfile, ...updates };
+        setUserProfile(updated);
+        await offlineDB.put(STORES.USERS, updated);
+      }
+
+      setEditingProfile(false);
+      setShowProfileModal(false);
+      setNewUsername('');
+      setNewAvatar('');
+    } catch (error) {
+      console.error("Erreur mise à jour profil:", error);
+      setEditingProfile(false);
+    }
+  };
+
+  // ─── Charger les données hors ligne ───────────────────────────────────────
+  const loadOfflineData = async () => {
+    try {
+      const [users, conversations] = await Promise.all([
+        offlineDB.getAll(STORES.USERS),
+        offlineDB.getAll(STORES.CONVERSATIONS)
+      ]);
+
+      setContacts(users || []);
+
+      const messagesMap = {};
+      for (const conv of conversations || []) {
+        const msgs = await offlineDB.getAll(STORES.MESSAGES);
+        const convMessages = msgs.filter(m => m.conversation_id === conv.id);
+        const contactId = conv.participant_a === currentUser?.id 
+          ? conv.participant_b 
+          : conv.participant_a;
+        messagesMap[contactId] = convMessages;
+      }
+      setMessages(messagesMap);
+
+      const pending = await offlineDB.get(STORES.PENDING_MESSAGES, 'pending');
+      setPendingMessages(pending?.messages || []);
+    } catch (error) {
+      console.error("Erreur chargement données hors ligne:", error);
+    }
+  };
+
+  // ─── S'assurer que l'utilisateur existe ──────────────────────────────────
+  const ensureUserExists = async (user) => {
+    try {
+      if (isOnline) {
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (error && error.code === 'PGRST116') {
+          const { data: newUser, error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: user.id,
+              name: user.user_metadata?.name || `Utilisateur ${user.id.slice(0, 6)}`,
+              avatar_url: user.user_metadata?.avatar_url || null,
+              status: 'online',
+              last_seen: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (insertError) throw insertError;
+          await offlineDB.put(STORES.USERS, newUser);
+          return newUser;
+        }
+
+        if (data) {
+          await offlineDB.put(STORES.USERS, data);
+          return data;
+        }
+      }
+
+      const cached = await offlineDB.get(STORES.USERS, user.id);
+      if (cached) return cached;
+      
+      const localUser = {
+        id: user.id,
+        name: user.user_metadata?.name || `Utilisateur ${user.id.slice(0, 6)}`,
+        status: 'offline',
+        created_at: new Date().toISOString()
+      };
+      await offlineDB.put(STORES.USERS, localUser);
+      return localUser;
+    } catch (error) {
+      console.error("Erreur ensureUserExists:", error);
+      return user;
+    }
+  };
+
+  // ─── Charger les contacts ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || loading || !isAuthenticated) return;
+
+    const loadContacts = async () => {
+      try {
+        if (isOnline) {
+          const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .neq('id', currentUser.id)
+            .order('name');
+
+          if (error) throw error;
+          
+          if (data) {
+            setContacts(data);
+            await offlineDB.batchPut(STORES.USERS, data);
+          }
+        } else {
+          const users = await offlineDB.getAll(STORES.USERS);
+          const filtered = users.filter(u => u.id !== currentUser.id);
+          setContacts(filtered);
+        }
+      } catch (error) {
+        console.error("Erreur chargement contacts:", error);
+        const users = await offlineDB.getAll(STORES.USERS);
+        const filtered = users.filter(u => u.id !== currentUser.id);
+        setContacts(filtered);
+      }
+    };
+
+    loadContacts();
+
+    if (isOnline) {
+      const subscription = supabase
+        .channel('users-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'users',
+            filter: `id=neq.${currentUser.id}`
+          },
+          (payload) => {
+            setContacts(prev => 
+              prev.map(contact => 
+                contact.id === payload.new.id 
+                  ? { ...contact, status: payload.new.status, last_seen: payload.new.last_seen }
+                  : contact
+              )
+            );
+            offlineDB.put(STORES.USERS, payload.new);
+          }
+        )
+        .subscribe();
+
+      return () => subscription.unsubscribe();
+    }
+  }, [currentUser, isOnline, loading, isAuthenticated]);
+
+  // ─── Charger les conversations ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || loading || !isAuthenticated) return;
+
+    const loadConversations = async () => {
+      try {
+        if (isOnline) {
+          const { data, error } = await supabase
+            .from('conversations')
+            .select(`
+              *,
+              user_a:users!conversations_participant_a_fkey(id, name, avatar_url, status),
+              user_b:users!conversations_participant_b_fkey(id, name, avatar_url, status)
+            `)
+            .or(`participant_a.eq.${currentUser.id},participant_b.eq.${currentUser.id}`)
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          if (data) {
+            await offlineDB.batchPut(STORES.CONVERSATIONS, data);
+          }
+        }
+      } catch (error) {
+        console.error("Erreur chargement conversations:", error);
+      }
+    };
+
+    loadConversations();
+  }, [currentUser, isOnline, loading, isAuthenticated]);
+
+  // ─── Charger les messages ─────────────────────────────────────────────────
+  const loadMessages = useCallback(async (contactId) => {
+    if (!currentUser) return;
+
+    try {
+      if (isOnline) {
+        const conversation = await getOrCreateConversation(contactId);
+        if (!conversation) return;
+
+        const { data, error } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversation.id)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        const msgs = data || [];
+        setMessages(prev => ({
+          ...prev,
+          [contactId]: msgs
+        }));
+
+        await offlineDB.batchPut(STORES.MESSAGES, msgs);
+        await markMessagesAsRead(conversation.id, contactId);
+
+        return conversation;
+      } else {
+        const allMessages = await offlineDB.getAll(STORES.MESSAGES);
+        const contactMessages = allMessages.filter(m => 
+          (m.sender_id === contactId && m.receiver_id === currentUser.id) ||
+          (m.sender_id === currentUser.id && m.receiver_id === contactId)
+        );
+        setMessages(prev => ({
+          ...prev,
+          [contactId]: contactMessages
+        }));
+      }
+    } catch (error) {
+      console.error("Erreur chargement messages:", error);
+      const allMessages = await offlineDB.getAll(STORES.MESSAGES);
+      const contactMessages = allMessages.filter(m => 
+        (m.sender_id === contactId && m.receiver_id === currentUser.id) ||
+        (m.sender_id === currentUser.id && m.receiver_id === contactId)
+      );
+      setMessages(prev => ({
+        ...prev,
+        [contactId]: contactMessages
+      }));
+    }
+  }, [currentUser, isOnline]);
+
+  // ─── Obtenir ou créer une conversation ──────────────────────────────────
+  const getOrCreateConversation = async (contactId) => {
+    try {
+      const localConvs = await offlineDB.getAll(STORES.CONVERSATIONS);
+      const existing = localConvs.find(c => 
+        (c.participant_a === currentUser.id && c.participant_b === contactId) ||
+        (c.participant_a === contactId && c.participant_b === currentUser.id)
+      );
+
+      if (existing && isOnline) {
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', existing.id)
+          .single();
+
+        if (!error && data) return data;
+      }
+
+      if (existing) return existing;
+
+      if (!isOnline) {
+        const tempConv = {
+          id: `temp-${Date.now()}`,
+          participant_a: currentUser.id,
+          participant_b: contactId,
+          created_at: new Date().toISOString(),
+          is_temp: true
+        };
+        await offlineDB.put(STORES.CONVERSATIONS, tempConv);
+        return tempConv;
+      }
+
+      const { data: newConv, error: createError } = await supabase
+        .from('conversations')
+        .insert({
+          participant_a: currentUser.id,
+          participant_b: contactId
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      
+      await offlineDB.put(STORES.CONVERSATIONS, newConv);
+      return newConv;
+    } catch (error) {
+      console.error("Erreur getOrCreateConversation:", error);
+      
+      const tempConv = {
+        id: `temp-${Date.now()}`,
+        participant_a: currentUser.id,
+        participant_b: contactId,
+        created_at: new Date().toISOString(),
+        is_temp: true
+      };
+      await offlineDB.put(STORES.CONVERSATIONS, tempConv);
+      return tempConv;
+    }
+  };
+
+  // ─── Marquer les messages comme lus ──────────────────────────────────────
+  const markMessagesAsRead = async (conversationId, contactId) => {
+    try {
+      if (isOnline) {
+        await supabase
+          .from('messages')
+          .update({ read: true })
+          .eq('conversation_id', conversationId)
+          .eq('sender_id', contactId)
+          .eq('read', false);
+      }
+      
+      const allMessages = await offlineDB.getAll(STORES.MESSAGES);
+      const updated = allMessages.map(m => 
+        m.conversation_id === conversationId && m.sender_id === contactId
+          ? { ...m, read: true }
+          : m
+      );
+      await offlineDB.batchPut(STORES.MESSAGES, updated);
+    } catch (error) {
+      console.error("Erreur markMessagesAsRead:", error);
+    }
+  };
+
+  // ─── Sélectionner un contact ──────────────────────────────────────────────
+  const selectContact = useCallback(async (contact) => {
+    setActiveContact(contact);
+    setSidebarVisible(false);
+    await loadMessages(contact.id);
+    setTimeout(() => inputRef.current?.focus(), 100);
+  }, [loadMessages]);
+
+  // ─── Envoyer un message ──────────────────────────────────────────────────
+  const sendMessage = useCallback(async () => {
+    if (!input.trim() || !activeContact || !currentUser) return;
+
+    const messageContent = input.trim();
+    const tempId = `temp-${Date.now()}`;
+    const message = {
+      id: tempId,
+      content: messageContent,
+      sender_id: currentUser.id,
+      receiver_id: activeContact.id,
+      created_at: new Date().toISOString(),
+      read: false,
+      pending: !isOnline,
+      conversation_id: null
+    };
+
+    try {
+      const conversation = await getOrCreateConversation(activeContact.id);
+      if (conversation) {
+        message.conversation_id = conversation.id;
+      }
+
+      setMessages(prev => ({
+        ...prev,
+        [activeContact.id]: [...(prev[activeContact.id] || []), message]
+      }));
+
+      await offlineDB.put(STORES.MESSAGES, message);
+
+      if (isOnline && conversation && !conversation.is_temp) {
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversation.id,
+            sender_id: currentUser.id,
+            content: messageContent,
+            read: false
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        await offlineDB.delete(STORES.MESSAGES, tempId);
+        await offlineDB.put(STORES.MESSAGES, data);
+        
+        setMessages(prev => ({
+          ...prev,
+          [activeContact.id]: prev[activeContact.id].map(m => 
+            m.id === tempId ? data : m
+          )
+        }));
+      } else {
+        const pending = [...pendingMessages, message];
+        setPendingMessages(pending);
+        await offlineDB.put(STORES.PENDING_MESSAGES, { id: 'pending', messages: pending });
+        setSyncStatus('pending');
+      }
+
+      setInput("");
+      setShowEmoji(false);
+    } catch (error) {
+      console.error("Erreur envoi message:", error);
+      const pending = [...pendingMessages, message];
+      setPendingMessages(pending);
+      await offlineDB.put(STORES.PENDING_MESSAGES, { id: 'pending', messages: pending });
+      setSyncStatus('pending');
+    }
+  }, [input, activeContact, currentUser, isOnline, pendingMessages]);
+
+  // ─── Synchroniser les messages en attente ────────────────────────────────
+  const syncPendingMessages = useCallback(async () => {
+    if (!isOnline || pendingMessages.length === 0 || !currentUser) return;
+
+    setSyncStatus('syncing');
+    const pending = [...pendingMessages];
+    const synced = [];
+
+    for (const msg of pending) {
+      try {
+        const contactId = msg.receiver_id || activeContact?.id;
+        if (!contactId) continue;
+
+        const conversation = await getOrCreateConversation(contactId);
+        if (!conversation || conversation.is_temp) continue;
+
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversation.id,
+            sender_id: currentUser.id,
+            content: msg.content,
+            read: false
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        await offlineDB.delete(STORES.MESSAGES, msg.id);
+        await offlineDB.put(STORES.MESSAGES, data);
+        synced.push(data);
+      } catch (error) {
+        console.error("Erreur synchronisation message:", error);
+        synced.push(msg);
+      }
+    }
+
+    const remaining = pending.filter(m => !synced.includes(m));
+    setPendingMessages(remaining);
+    await offlineDB.put(STORES.PENDING_MESSAGES, { id: 'pending', messages: remaining });
+    setSyncStatus(remaining.length > 0 ? 'pending' : 'idle');
+
+    if (activeContact) {
+      const allMessages = await offlineDB.getAll(STORES.MESSAGES);
+      const contactMessages = allMessages.filter(m => 
+        (m.sender_id === activeContact.id && m.receiver_id === currentUser.id) ||
+        (m.sender_id === currentUser.id && m.receiver_id === activeContact.id)
+      );
+      setMessages(prev => ({
+        ...prev,
+        [activeContact.id]: contactMessages
+      }));
+    }
+  }, [isOnline, pendingMessages, currentUser, activeContact]);
+
+  // ─── Écouter les messages en temps réel ──────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || !isOnline || !isAuthenticated) return;
+
+    const subscription = supabase
+      .channel('messages-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        async (payload) => {
+          const newMsg = payload.new;
+          
+          if (newMsg.sender_id === currentUser.id) return;
+
+          const contactId = newMsg.sender_id;
+
+          await offlineDB.put(STORES.MESSAGES, newMsg);
+
+          setMessages(prev => ({
+            ...prev,
+            [contactId]: [...(prev[contactId] || []), newMsg]
+          }));
+
+          if (activeContact?.id === contactId) {
+            await markMessagesAsRead(newMsg.conversation_id, contactId);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => subscription.unsubscribe();
+  }, [currentUser, isOnline, isAuthenticated, activeContact]);
+
+  // ─── Mettre à jour le status ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || loading || !isAuthenticated) return;
+
+    const updateStatus = async (status) => {
+      try {
+        if (isOnline) {
+          await supabase
+            .from('users')
+            .update({ 
+              status,
+              last_seen: new Date().toISOString()
+            })
+            .eq('id', currentUser.id);
+        }
+        
+        const user = await offlineDB.get(STORES.USERS, currentUser.id);
+        if (user) {
+          await offlineDB.put(STORES.USERS, { ...user, status, last_seen: new Date().toISOString() });
+        }
+      } catch (error) {
+        console.error("Erreur updateStatus:", error);
+      }
+    };
+
+    if (isOnline) {
+      updateStatus('online');
+    }
+
+    const handleBeforeUnload = () => {
+      updateStatus('offline');
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        updateStatus('away');
+      } else if (isOnline) {
+        updateStatus('online');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (isOnline) {
+        updateStatus('offline');
+      }
+    };
+  }, [currentUser, isOnline, loading, isAuthenticated]);
+
+  // ─── Scroll ──────────────────────────────────────────────────────────────
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
   }, []);
@@ -138,8 +1028,24 @@ export default function ChatApp() {
     setShowScrollBtn(!atBottom);
   };
 
+  // ─── PWA ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setShowInstallBanner(true);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // ─── Filtrage et helpers ──────────────────────────────────────────────────
   const filteredContacts = contacts.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
+    c.name?.toLowerCase().includes(search.toLowerCase())
   );
 
   const lastMsg = (contactId) => {
@@ -149,65 +1055,8 @@ export default function ChatApp() {
 
   const unreadCount = (contactId) => {
     return (messages[contactId] || []).filter(
-      (m) => m.sender_id !== "me" && !m.read
+      (m) => m.sender_id !== currentUser?.id && !m.read && !m.pending
     ).length;
-  };
-
-  const sendMessage = () => {
-    if (!input.trim() || !activeContact) return;
-    const newMsg = {
-      id: `m-${Date.now()}`,
-      content: input.trim(),
-      sender_id: "me",
-      created_at: new Date().toISOString(),
-      read: false,
-    };
-    setMessages((prev) => ({
-      ...prev,
-      [activeContact.id]: [...(prev[activeContact.id] || []), newMsg],
-    }));
-    setInput("");
-    setShowEmoji(false);
-
-    // Simuler une réponse
-    const contactId = activeContact.id;
-    setIsTyping(true);
-    setTimeout(() => {
-      const replies = [
-        "Super ! 😄", "Ah oui, intéressant !", "Je vois ce que tu veux dire.",
-        "Ok, je note ça.", "Parfait, merci !", "👍", "On en reparle demain ?",
-        "Bonne idée !", "Ça marche pour moi.", "Excellent ! 🚀",
-      ];
-      const reply = {
-        id: `m-${Date.now() + 1}`,
-        content: replies[Math.floor(Math.random() * replies.length)],
-        sender_id: contactId,
-        created_at: new Date().toISOString(),
-        read: false,
-      };
-      setMessages((prev) => ({
-        ...prev,
-        [contactId]: [...(prev[contactId] || []), reply],
-      }));
-      setIsTyping(false);
-    }, 1500 + Math.random() * 1000);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const selectContact = (contact) => {
-    setActiveContact(contact);
-    setMessages((prev) => ({
-      ...prev,
-      [contact.id]: (prev[contact.id] || []).map((m) => ({ ...m, read: true })),
-    }));
-    if (window.innerWidth <= 768) setSidebarVisible(false);
-    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const handleInstall = async () => {
@@ -217,11 +1066,156 @@ export default function ChatApp() {
     if (outcome === "accepted") setShowInstallBanner(false);
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
   const currentMessages = activeContact ? groupByDate(messages[activeContact.id] || []) : [];
   const onlineCount = contacts.filter((c) => c.status === "online").length;
 
+  // ─── Écran d'authentification ─────────────────────────────────────────────
+  if (!isAuthenticated && !loading) {
+    return (
+      <div className="auth-container">
+        <div className="auth-card">
+          <div className="auth-header">
+            <h1>Chat<span>.</span></h1>
+            <p className="auth-subtitle">
+              {authMode === 'login' ? 'Connectez-vous à votre compte' : 'Créez votre compte'}
+            </p>
+          </div>
+
+          <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="auth-form">
+            {authMode === 'register' && (
+              <div className="auth-field">
+                <label>Nom d'utilisateur</label>
+                <input
+                  type="text"
+                  placeholder="Votre nom"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            <div className="auth-field">
+              <label>Email</label>
+              <input
+                type="email"
+                placeholder="votre@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="auth-field">
+              <label>Mot de passe</label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+              />
+              {authMode === 'register' && (
+                <small className="auth-hint">Minimum 6 caractères</small>
+              )}
+            </div>
+
+            {authError && (
+              <div className="auth-error">{authError}</div>
+            )}
+
+            <button 
+              type="submit" 
+              className="auth-btn"
+              disabled={authLoading}
+            >
+              {authLoading ? (
+                <span className="auth-spinner"></span>
+              ) : (
+                authMode === 'login' ? 'Se connecter' : 'S\'inscrire'
+              )}
+            </button>
+          </form>
+
+          <div className="auth-footer">
+            {authMode === 'login' ? (
+              <p>
+                Pas encore de compte ?{' '}
+                <button 
+                  className="auth-switch-btn"
+                  onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                >
+                  S'inscrire
+                </button>
+              </p>
+            ) : (
+              <p>
+                Déjà un compte ?{' '}
+                <button 
+                  className="auth-switch-btn"
+                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                >
+                  Se connecter
+                </button>
+              </p>
+            )}
+          </div>
+
+          {!isOnline && (
+            <div className="auth-offline-notice">
+              <i className="fa-solid fa-wifi-slash" />
+              <span>Mode hors ligne - La connexion nécessite Internet</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Chargement ─────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="loading-screen">
+        <div className="loading-spinner"></div>
+        <p>{isOnline ? 'Chargement...' : 'Mode hors ligne...'}</p>
+        {!isOnline && (
+          <small style={{ color: 'var(--text-secondary)', marginTop: 8 }}>
+            Les données seront synchronisées lors de la reconnexion
+          </small>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Application principale ──────────────────────────────────────────────────
   return (
     <div className="chat-app">
+      {/* Barre de statut hors ligne */}
+      {!isOnline && (
+        <div className="offline-banner">
+          <i className="fa-solid fa-wifi-slash" />
+          <span>Mode hors ligne - Les messages seront synchronisés à la reconnexion</span>
+          {pendingMessages.length > 0 && (
+            <span className="pending-badge">{pendingMessages.length} en attente</span>
+          )}
+        </div>
+      )}
+
+      {isOnline && syncStatus === 'syncing' && (
+        <div className="sync-banner">
+          <i className="fa-solid fa-sync fa-spin" />
+          <span>Synchronisation en cours...</span>
+        </div>
+      )}
+
       {/* Sidebar */}
       <div className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}>
         <div className="sidebar-header">
@@ -234,14 +1228,43 @@ export default function ChatApp() {
             >
               <i className={`fa-solid fa-${theme === "dark" ? "sun" : "moon"}`} />
             </button>
-            <button className="icon-btn" title="Nouveau chat">
-              <i className="fa-solid fa-pen-to-square" />
+            <button 
+              className="icon-btn" 
+              title="Déconnexion"
+              onClick={logout}
+            >
+              <i className="fa-solid fa-sign-out-alt" />
             </button>
             <button className="icon-btn" title="Paramètres">
               <i className="fa-solid fa-ellipsis-vertical" />
             </button>
           </div>
         </div>
+
+        {/* ─── PROFIL UTILISATEUR ─── */}
+        {userProfile && (
+          <div className="user-profile" onClick={() => setShowProfileModal(true)}>
+            <div className="profile-avatar">
+              <div className="avatar-circle profile-avatar-circle">
+                {getInitials(userProfile.name)}
+              </div>
+              <div className={`profile-status-dot ${userProfile.status || 'offline'}`} />
+            </div>
+            <div className="profile-info">
+              <div className="profile-name">{userProfile.name}</div>
+              <div className="profile-email">{currentUser?.email || 'Utilisateur'}</div>
+              <div className="profile-status">
+                <span className={`status-text ${userProfile.status || 'offline'}`}>
+                  ● {userProfile.status === 'online' ? 'En ligne' : 
+                     userProfile.status === 'away' ? 'Absent' : 'Hors ligne'}
+                </span>
+              </div>
+            </div>
+            <button className="profile-edit-btn" title="Modifier le profil">
+              <i className="fa-solid fa-pen" />
+            </button>
+          </div>
+        )}
 
         <div className="search-wrap">
           <div className="search-box">
@@ -261,12 +1284,14 @@ export default function ChatApp() {
 
         <div className="online-count">
           <i className="fa-solid fa-circle" />
-          {onlineCount} contact{onlineCount > 1 ? "s" : ""} en ligne
+          {isOnline ? `${onlineCount} contact${onlineCount > 1 ? "s" : ""} en ligne` : '📶 Hors ligne'}
         </div>
 
         <div className="contacts-list">
           {filteredContacts.length === 0 ? (
-            <div className="no-contacts">Aucun contact trouvé</div>
+            <div className="no-contacts">
+              {search ? "Aucun contact trouvé" : "Aucun contact disponible"}
+            </div>
           ) : (
             filteredContacts.map((contact) => {
               const last = lastMsg(contact.id);
@@ -279,7 +1304,7 @@ export default function ChatApp() {
                 >
                   <div className="avatar">
                     <div className="avatar-circle">{getInitials(contact.name)}</div>
-                    <div className={`status-dot ${contact.status}`} />
+                    <div className={`status-dot ${contact.status || 'offline'}`} />
                   </div>
                   <div className="contact-info">
                     <div className="contact-top">
@@ -290,9 +1315,10 @@ export default function ChatApp() {
                       <span className="preview-text">
                         {last ? (
                           <>
-                            {last.sender_id === "me" && (
-                              <i className="fa-solid fa-check-double" />
+                            {last.sender_id === currentUser?.id && (
+                              <i className={`fa-solid ${last.pending ? 'fa-clock' : 'fa-check-double'}`} />
                             )}
+                            {last.pending && <span className="pending-label">[En attente] </span>}
                             {last.content}
                           </>
                         ) : (
@@ -322,23 +1348,27 @@ export default function ChatApp() {
               </button>
               <div className="avatar">
                 <div className="avatar-circle avatar-sm">{getInitials(activeContact.name)}</div>
-                <div className={`status-dot ${activeContact.status}`} />
+                <div className={`status-dot ${activeContact.status || 'offline'}`} />
               </div>
               <div className="chat-header-info">
                 <div className="chat-header-name">{activeContact.name}</div>
-                <div className={`chat-header-status ${isTyping ? "typing" : activeContact.status}`}>
+                <div className={`chat-header-status ${isTyping ? "typing" : activeContact.status || 'offline'}`}>
                   {isTyping
                     ? "est en train d'écrire..."
+                    : !isOnline
+                    ? "Hors ligne (mode déconnecté)"
                     : activeContact.status === "online"
                     ? "En ligne"
-                    : activeContact.last_seen || "Hors ligne"}
+                    : activeContact.last_seen 
+                      ? `Dernière connexion: ${formatTime(activeContact.last_seen)}`
+                      : "Hors ligne"}
                 </div>
               </div>
               <div className="header-actions">
-                <button className="icon-btn" title="Appel vidéo">
+                <button className="icon-btn" title="Appel vidéo" disabled={!isOnline}>
                   <i className="fa-solid fa-video" />
                 </button>
-                <button className="icon-btn" title="Appel audio">
+                <button className="icon-btn" title="Appel audio" disabled={!isOnline}>
                   <i className="fa-solid fa-phone" />
                 </button>
                 <button className="icon-btn" title="Plus d'options">
@@ -356,7 +1386,7 @@ export default function ChatApp() {
               {currentMessages.length === 0 ? (
                 <div className="empty-messages">
                   <i className="fa-regular fa-comment-dots" />
-                  Commencez la conversation !
+                  {isOnline ? 'Commencez la conversation !' : 'Mode hors ligne - Les messages seront synchronisés à la reconnexion'}
                 </div>
               ) : (
                 currentMessages.map((item) =>
@@ -367,16 +1397,19 @@ export default function ChatApp() {
                   ) : (
                     <div
                       key={item.id}
-                      className={`msg-wrapper ${item.sender_id === "me" ? "out" : "in"}`}
+                      className={`msg-wrapper ${item.sender_id === currentUser?.id ? "out" : "in"}`}
                     >
-                      <div className={`bubble ${item.sender_id === "me" ? "out" : "in"}`}>
+                      <div className={`bubble ${item.sender_id === currentUser?.id ? "out" : "in"}`}>
                         {item.content}
                         <div className="bubble-meta">
                           <span className="bubble-time">{formatTime(item.created_at)}</span>
-                          {item.sender_id === "me" && (
+                          {item.sender_id === currentUser?.id && (
                             <i
-                              className={`fa-solid fa-check-double read-icon ${item.read ? "read" : ""}`}
+                              className={`fa-solid ${item.pending ? 'fa-clock' : 'fa-check-double'} read-icon ${item.read ? "read" : ""}`}
                             />
+                          )}
+                          {item.pending && (
+                            <span className="pending-badge-small">⏳</span>
                           )}
                         </div>
                       </div>
@@ -422,13 +1455,13 @@ export default function ChatApp() {
 
             {/* Input */}
             <div className="input-area">
-              <button className="icon-btn attach-btn" title="Joindre un fichier">
+              <button className="icon-btn attach-btn" title="Joindre un fichier" disabled={!isOnline}>
                 <i className="fa-solid fa-paperclip" />
               </button>
               <textarea
                 ref={inputRef}
                 className="input-box"
-                placeholder="Message"
+                placeholder={isOnline ? "Message" : "Hors ligne - Le message sera envoyé à la reconnexion"}
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
@@ -437,6 +1470,7 @@ export default function ChatApp() {
                 }}
                 onKeyDown={handleKeyDown}
                 rows={1}
+                disabled={!activeContact}
               />
               <button
                 className="icon-btn emoji-btn"
@@ -445,8 +1479,13 @@ export default function ChatApp() {
               >
                 <i className="fa-regular fa-face-smile" />
               </button>
-              <button className="send-btn" onClick={sendMessage} title="Envoyer">
-                <i className="fa-solid fa-paper-plane" />
+              <button 
+                className="send-btn" 
+                onClick={sendMessage} 
+                title={!isOnline ? "En attente de connexion" : "Envoyer"}
+                disabled={!activeContact || !input.trim()}
+              >
+                <i className={`fa-solid ${!isOnline ? 'fa-clock' : 'fa-paper-plane'}`} />
               </button>
             </div>
           </>
@@ -457,6 +1496,12 @@ export default function ChatApp() {
             </div>
             <h2>Bienvenue sur Chat.</h2>
             <p>Sélectionnez une conversation pour commencer à discuter avec vos contacts.</p>
+            {!isOnline && (
+              <div className="offline-notice">
+                <i className="fa-solid fa-wifi-slash" />
+                <span>Mode hors ligne - Les données sont disponibles localement</span>
+              </div>
+            )}
             <div className="features-tags">
               {["🔒 Chiffré", "⚡ Temps réel", "📱 Multiplateforme"].map((tag) => (
                 <span key={tag} className="feature-tag">{tag}</span>
@@ -465,6 +1510,127 @@ export default function ChatApp() {
           </div>
         )}
       </div>
+
+      {/* ─── MODAL PROFIL ─── */}
+      {showProfileModal && userProfile && (
+        <div className="profile-modal-overlay" onClick={() => setShowProfileModal(false)}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="profile-modal-header">
+              <h2>Mon Profil</h2>
+              <button className="close-modal-btn" onClick={() => setShowProfileModal(false)}>
+                <i className="fa-solid fa-xmark" />
+              </button>
+            </div>
+
+            <div className="profile-modal-body">
+              <div className="profile-modal-avatar">
+                <div className="avatar-circle profile-modal-avatar-circle">
+                  {getInitials(userProfile.name)}
+                </div>
+                <div className={`profile-status-dot ${userProfile.status || 'offline'}`} />
+              </div>
+
+              <div className="profile-modal-info">
+                <div className="profile-modal-field">
+                  <label>Nom</label>
+                  <div className="profile-modal-value">{userProfile.name}</div>
+                </div>
+
+                <div className="profile-modal-field">
+                  <label>Email</label>
+                  <div className="profile-modal-value">{currentUser?.email || 'Non défini'}</div>
+                </div>
+
+                <div className="profile-modal-field">
+                  <label>Statut</label>
+                  <div className={`profile-modal-status ${userProfile.status || 'offline'}`}>
+                    ● {userProfile.status === 'online' ? 'En ligne' : 
+                       userProfile.status === 'away' ? 'Absent' : 'Hors ligne'}
+                  </div>
+                </div>
+
+                <div className="profile-modal-field">
+                  <label>Membre depuis</label>
+                  <div className="profile-modal-value">
+                    {userProfile.created_at 
+                      ? new Date(userProfile.created_at).toLocaleDateString('fr-FR', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric'
+                        })
+                      : 'Récemment'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-modal-actions">
+                <button 
+                  className="profile-edit-btn-modal"
+                  onClick={() => {
+                    setNewUsername(userProfile.name);
+                    setNewAvatar(userProfile.avatar_url || '');
+                    setEditingProfile(true);
+                  }}
+                >
+                  <i className="fa-solid fa-pen" />
+                  Modifier le profil
+                </button>
+                <button 
+                  className="profile-logout-btn"
+                  onClick={logout}
+                >
+                  <i className="fa-solid fa-sign-out-alt" />
+                  Se déconnecter
+                </button>
+              </div>
+
+              {/* Formulaire d'édition */}
+              {editingProfile && (
+                <div className="profile-edit-form">
+                  <h3>Modifier mon profil</h3>
+                  <div className="auth-field">
+                    <label>Nom d'utilisateur</label>
+                    <input
+                      type="text"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                      placeholder="Votre nom"
+                    />
+                  </div>
+                  <div className="auth-field">
+                    <label>URL de l'avatar (optionnel)</label>
+                    <input
+                      type="text"
+                      value={newAvatar}
+                      onChange={(e) => setNewAvatar(e.target.value)}
+                      placeholder="https://exemple.com/avatar.jpg"
+                    />
+                  </div>
+                  <div className="profile-edit-actions">
+                    <button 
+                      className="profile-save-btn"
+                      onClick={updateProfile}
+                      disabled={editingProfile}
+                    >
+                      {editingProfile ? 'Enregistrement...' : 'Enregistrer'}
+                    </button>
+                    <button 
+                      className="profile-cancel-btn"
+                      onClick={() => {
+                        setEditingProfile(false);
+                        setNewUsername('');
+                        setNewAvatar('');
+                      }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PWA Install banner */}
       {showInstallBanner && (
