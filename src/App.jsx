@@ -1,20 +1,45 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import bcrypt from 'bcryptjs'; // ⬅️ IMPORT BCRYPT
 import './App.css';
 
 // ─── Configuration Supabase ──────────────────────────────────────────────────
 const SUPABASE_URL = "https://oohtrnmnrybaxwopzdam.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vaHRybm1ucnliYXh3b3B6ZGFtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjIxMTkyNSwiZXhwIjoyMDk3Nzg3OTI1fQ.z4qXvP_4DkL1Nq58PN_luq98Q-Nr7XskzZGMiZDrNUQ";
 
-// Initialisation du client Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ─── Fonctions de hachage avec bcrypt ──────────────────────────────────────
+const SALT_ROUNDS = 10; // Plus élevé = plus sécurisé mais plus lent
+
+// Hacher un mot de passe
+const hashPassword = async (password) => {
+  try {
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
+    const hash = await bcrypt.hash(password, salt);
+    return hash;
+  } catch (error) {
+    console.error('Erreur de hachage:', error);
+    throw error;
+  }
+};
+
+// Vérifier un mot de passe
+const verifyPassword = async (password, hash) => {
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch (error) {
+    console.error('Erreur de vérification:', error);
+    return false;
+  }
+};
 
 // ─── Emojis ───────────────────────────────────────────────────────────────────
 const EMOJIS = ["😀","😂","😊","😍","🥰","😎","🤔","😅","🙏","👍","❤️","🔥","✨","🎉","🚀","💯","😭","😤","🤣","😇","😋","🤗","😏","😬","🤩","😴","🥳","💪","👏","🙌"];
 
 // ─── IndexedDB ──────────────────────────────────────────────────────────────
 const DB_NAME = 'ChatAppDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORES = {
   USERS: 'users',
   MESSAGES: 'messages',
@@ -193,10 +218,12 @@ export default function ChatApp() {
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   // ─── App State ─────────────────────────────────────────────────────────────
   const [theme, setTheme] = useState("dark");
@@ -253,17 +280,16 @@ export default function ChatApp() {
         if (session && session.user) {
           setCurrentUser(session.user);
           setIsAuthenticated(true);
+          setIsOfflineMode(session.offline || false);
           await loadOfflineData();
           setLoading(false);
           
-          if (isOnline) {
+          if (isOnline && !session.offline) {
             try {
               const { data: { session: supabaseSession } } = await supabase.auth.getSession();
               if (supabaseSession) {
                 setCurrentUser(supabaseSession.user);
                 await ensureUserExists(supabaseSession.user);
-              } else {
-                await logout();
               }
             } catch (e) {
               console.log('Session Supabase expirée, utilisation du cache');
@@ -278,8 +304,9 @@ export default function ChatApp() {
             if (supabaseSession) {
               setCurrentUser(supabaseSession.user);
               setIsAuthenticated(true);
+              setIsOfflineMode(false);
               await ensureUserExists(supabaseSession.user);
-              await offlineDB.put(STORES.SESSION, { id: 'session', user: supabaseSession.user });
+              await offlineDB.put(STORES.SESSION, { id: 'session', user: supabaseSession.user, offline: false });
               setLoading(false);
               return;
             }
@@ -300,36 +327,6 @@ export default function ChatApp() {
     checkSession();
   }, [isOnline]);
 
-  // ─── Charger le profil utilisateur ────────────────────────────────────────
-  useEffect(() => {
-    const loadUserProfile = async () => {
-      if (!currentUser) return;
-
-      try {
-        if (isOnline) {
-          const { data, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', currentUser.id)
-            .single();
-
-          if (error) throw error;
-          if (data) {
-            setUserProfile(data);
-            await offlineDB.put(STORES.USERS, data);
-          }
-        } else {
-          const cached = await offlineDB.get(STORES.USERS, currentUser.id);
-          if (cached) setUserProfile(cached);
-        }
-      } catch (error) {
-        console.error("Erreur chargement profil:", error);
-      }
-    };
-
-    loadUserProfile();
-  }, [currentUser, isOnline]);
-
   // ─── Fonction d'inscription ──────────────────────────────────────────────
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -345,35 +342,97 @@ export default function ChatApp() {
         throw new Error('Le mot de passe doit contenir au moins 6 caractères');
       }
 
+      if (password !== confirmPassword) {
+        throw new Error('Les mots de passe ne correspondent pas');
+      }
+
+      // Si hors ligne, créer un compte local
+      if (!isOnline) {
+        // Hacher le mot de passe avec bcrypt
+        const hashedPassword = await hashPassword(password);
+        
+        const localUser = {
+          id: `local-${Date.now()}`,
+          name: username,
+          email: email,
+          password_hash: hashedPassword, // Stocké avec bcrypt
+          status: 'offline',
+          created_at: new Date().toISOString(),
+          is_local: true
+        };
+
+        // Vérifier si l'email existe déjà localement
+        const existingUsers = await offlineDB.getAll(STORES.USERS);
+        if (existingUsers.some(u => u.email === email)) {
+          throw new Error('Cet email est déjà utilisé');
+        }
+
+        await offlineDB.put(STORES.USERS, localUser);
+        await offlineDB.put(STORES.SESSION, { id: 'session', user: localUser, offline: true });
+
+        setCurrentUser(localUser);
+        setUserProfile(localUser);
+        setIsAuthenticated(true);
+        setIsOfflineMode(true);
+        setAuthLoading(false);
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+        setUsername('');
+        return;
+      }
+
+      // Mode en ligne - inscription Supabase
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            name: username
-          }
+            name: username,
+            email: email
+          },
+          emailRedirectTo: window.location.origin
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('rate limit')) {
+          throw new Error('Trop de tentatives. Veuillez patienter 1 heure.');
+        }
+        throw error;
+      }
 
       if (data.user) {
+        // Hacher le mot de passe pour le stockage local
+        const hashedPassword = await hashPassword(password);
+        
         await ensureUserExists(data.user);
+        
+        // Ajouter le mot de passe hashé au profil local
+        const localProfile = await offlineDB.get(STORES.USERS, data.user.id);
+        if (localProfile) {
+          localProfile.password_hash = hashedPassword;
+          await offlineDB.put(STORES.USERS, localProfile);
+        }
+
         setCurrentUser(data.user);
         setIsAuthenticated(true);
-        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user });
+        setIsOfflineMode(false);
+        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user, offline: false });
         setAuthLoading(false);
         setEmail('');
         setPassword('');
+        setConfirmPassword('');
         setUsername('');
       }
     } catch (error) {
+      console.error('Erreur inscription:', error);
       setAuthError(error.message);
       setAuthLoading(false);
     }
   };
 
-  // ─── Fonction de connexion ───────────────────────────────────────────────
+  // ─── Fonction de connexion ──────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -384,23 +443,87 @@ export default function ChatApp() {
         throw new Error('Email et mot de passe requis');
       }
 
+      // Si hors ligne ou si la connexion Supabase échoue, vérifier localement
+      if (!isOnline) {
+        // Vérifier les identifiants localement avec bcrypt
+        const users = await offlineDB.getAll(STORES.USERS);
+        const user = users.find(u => u.email === email);
+        
+        if (!user) {
+          throw new Error('Email ou mot de passe incorrect');
+        }
+
+        if (!user.password_hash) {
+          throw new Error('Ce compte n\'a pas de mot de passe local. Connectez-vous en ligne.');
+        }
+
+        // Vérifier le mot de passe avec bcrypt
+        const isValid = await verifyPassword(password, user.password_hash);
+        if (!isValid) {
+          throw new Error('Email ou mot de passe incorrect');
+        }
+
+        await offlineDB.put(STORES.SESSION, { id: 'session', user, offline: true });
+        setCurrentUser(user);
+        setUserProfile(user);
+        setIsAuthenticated(true);
+        setIsOfflineMode(true);
+        await loadOfflineData();
+        setAuthLoading(false);
+        setEmail('');
+        setPassword('');
+        return;
+      }
+
+      // Mode en ligne - connexion Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
       });
 
-      if (error) throw error;
+      if (error) {
+        // Si la connexion Supabase échoue, essayer en local avec bcrypt
+        const users = await offlineDB.getAll(STORES.USERS);
+        const localUser = users.find(u => u.email === email);
+        
+        if (localUser && localUser.password_hash) {
+          const isValid = await verifyPassword(password, localUser.password_hash);
+          if (isValid) {
+            await offlineDB.put(STORES.SESSION, { id: 'session', user: localUser, offline: true });
+            setCurrentUser(localUser);
+            setUserProfile(localUser);
+            setIsAuthenticated(true);
+            setIsOfflineMode(true);
+            await loadOfflineData();
+            setAuthLoading(false);
+            setEmail('');
+            setPassword('');
+            return;
+          }
+        }
+        throw new Error('Email ou mot de passe incorrect');
+      }
 
       if (data.user) {
+        // Mettre à jour le mot de passe hashé localement avec bcrypt
+        const hashedPassword = await hashPassword(password);
+        const localProfile = await offlineDB.get(STORES.USERS, data.user.id);
+        if (localProfile) {
+          localProfile.password_hash = hashedPassword;
+          await offlineDB.put(STORES.USERS, localProfile);
+        }
+
         await ensureUserExists(data.user);
         setCurrentUser(data.user);
         setIsAuthenticated(true);
-        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user });
+        setIsOfflineMode(false);
+        await offlineDB.put(STORES.SESSION, { id: 'session', user: data.user, offline: false });
         setAuthLoading(false);
         setEmail('');
         setPassword('');
       }
     } catch (error) {
+      console.error('Erreur connexion:', error);
       setAuthError(error.message);
       setAuthLoading(false);
     }
@@ -416,62 +539,13 @@ export default function ChatApp() {
       setContacts([]);
       setMessages({});
       setActiveContact(null);
+      setIsOfflineMode(false);
       await offlineDB.clear(STORES.SESSION);
       await offlineDB.clear(STORES.MESSAGES);
       await offlineDB.clear(STORES.CONVERSATIONS);
       await offlineDB.clear(STORES.PENDING_MESSAGES);
     } catch (error) {
       console.error("Erreur déconnexion:", error);
-    }
-  };
-
-  // ─── Mettre à jour le profil ─────────────────────────────────────────────
-  const updateProfile = async () => {
-    if (!currentUser || !userProfile) return;
-
-    try {
-      setEditingProfile(true);
-
-      const updates = {};
-      if (newUsername && newUsername !== userProfile.name) {
-        updates.name = newUsername;
-      }
-      if (newAvatar !== undefined && newAvatar !== userProfile.avatar_url) {
-        updates.avatar_url = newAvatar || null;
-      }
-
-      if (Object.keys(updates).length === 0) {
-        setEditingProfile(false);
-        return;
-      }
-
-      if (isOnline) {
-        const { data, error } = await supabase
-          .from('users')
-          .update(updates)
-          .eq('id', currentUser.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          setUserProfile(data);
-          await offlineDB.put(STORES.USERS, data);
-        }
-      } else {
-        // Mise à jour hors ligne
-        const updated = { ...userProfile, ...updates };
-        setUserProfile(updated);
-        await offlineDB.put(STORES.USERS, updated);
-      }
-
-      setEditingProfile(false);
-      setShowProfileModal(false);
-      setNewUsername('');
-      setNewAvatar('');
-    } catch (error) {
-      console.error("Erreur mise à jour profil:", error);
-      setEditingProfile(false);
     }
   };
 
@@ -519,6 +593,7 @@ export default function ChatApp() {
             .insert({
               id: user.id,
               name: user.user_metadata?.name || `Utilisateur ${user.id.slice(0, 6)}`,
+              email: user.email || email,
               avatar_url: user.user_metadata?.avatar_url || null,
               status: 'online',
               last_seen: new Date().toISOString()
@@ -528,25 +603,32 @@ export default function ChatApp() {
 
           if (insertError) throw insertError;
           await offlineDB.put(STORES.USERS, newUser);
+          setUserProfile(newUser);
           return newUser;
         }
 
         if (data) {
           await offlineDB.put(STORES.USERS, data);
+          setUserProfile(data);
           return data;
         }
       }
 
       const cached = await offlineDB.get(STORES.USERS, user.id);
-      if (cached) return cached;
+      if (cached) {
+        setUserProfile(cached);
+        return cached;
+      }
       
       const localUser = {
         id: user.id,
         name: user.user_metadata?.name || `Utilisateur ${user.id.slice(0, 6)}`,
+        email: user.email || email || 'Non défini',
         status: 'offline',
         created_at: new Date().toISOString()
       };
       await offlineDB.put(STORES.USERS, localUser);
+      setUserProfile(localUser);
       return localUser;
     } catch (error) {
       console.error("Erreur ensureUserExists:", error);
@@ -627,8 +709,8 @@ export default function ChatApp() {
             .from('conversations')
             .select(`
               *,
-              user_a:users!conversations_participant_a_fkey(id, name, avatar_url, status),
-              user_b:users!conversations_participant_b_fkey(id, name, avatar_url, status)
+              user_a:users!conversations_participant_a_fkey(id, name, avatar_url, status, email),
+              user_b:users!conversations_participant_b_fkey(id, name, avatar_url, status, email)
             `)
             .or(`participant_a.eq.${currentUser.id},participant_b.eq.${currentUser.id}`)
             .order('created_at', { ascending: false });
@@ -1086,6 +1168,12 @@ export default function ChatApp() {
             <p className="auth-subtitle">
               {authMode === 'login' ? 'Connectez-vous à votre compte' : 'Créez votre compte'}
             </p>
+            {!isOnline && (
+              <div className="auth-offline-badge">
+                <i className="fa-solid fa-wifi-slash" />
+                Mode hors ligne - Connexion locale uniquement
+              </div>
+            )}
           </div>
 
           <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="auth-form">
@@ -1128,6 +1216,19 @@ export default function ChatApp() {
               )}
             </div>
 
+            {authMode === 'register' && (
+              <div className="auth-field">
+                <label>Confirmer le mot de passe</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
             {authError && (
               <div className="auth-error">{authError}</div>
             )}
@@ -1169,10 +1270,10 @@ export default function ChatApp() {
             )}
           </div>
 
-          {!isOnline && (
+          {!isOnline && !isAuthenticated && (
             <div className="auth-offline-notice">
-              <i className="fa-solid fa-wifi-slash" />
-              <span>Mode hors ligne - La connexion nécessite Internet</span>
+              <i className="fa-solid fa-info-circle" />
+              <span>Les comptes créés hors ligne seront stockés localement</span>
             </div>
           )}
         </div>
@@ -1186,11 +1287,6 @@ export default function ChatApp() {
       <div className="loading-screen">
         <div className="loading-spinner"></div>
         <p>{isOnline ? 'Chargement...' : 'Mode hors ligne...'}</p>
-        {!isOnline && (
-          <small style={{ color: 'var(--text-secondary)', marginTop: 8 }}>
-            Les données seront synchronisées lors de la reconnexion
-          </small>
-        )}
       </div>
     );
   }
@@ -1202,17 +1298,17 @@ export default function ChatApp() {
       {!isOnline && (
         <div className="offline-banner">
           <i className="fa-solid fa-wifi-slash" />
-          <span>Mode hors ligne - Les messages seront synchronisés à la reconnexion</span>
+          <span>Mode hors ligne - Fonctionnalités limitées</span>
           {pendingMessages.length > 0 && (
             <span className="pending-badge">{pendingMessages.length} en attente</span>
           )}
         </div>
       )}
 
-      {isOnline && syncStatus === 'syncing' && (
-        <div className="sync-banner">
-          <i className="fa-solid fa-sync fa-spin" />
-          <span>Synchronisation en cours...</span>
+      {isOfflineMode && (
+        <div className="offline-mode-banner">
+          <i className="fa-solid fa-user-secret" />
+          <span>Mode local - Vos données sont stockées localement</span>
         </div>
       )}
 
@@ -1241,7 +1337,7 @@ export default function ChatApp() {
           </div>
         </div>
 
-        {/* ─── PROFIL UTILISATEUR ─── */}
+        {/* Profil utilisateur */}
         {userProfile && (
           <div className="user-profile" onClick={() => setShowProfileModal(true)}>
             <div className="profile-avatar">
@@ -1251,12 +1347,16 @@ export default function ChatApp() {
               <div className={`profile-status-dot ${userProfile.status || 'offline'}`} />
             </div>
             <div className="profile-info">
-              <div className="profile-name">{userProfile.name}</div>
-              <div className="profile-email">{currentUser?.email || 'Utilisateur'}</div>
+              <div className="profile-name">
+                {userProfile.name}
+                {isOfflineMode && <span className="offline-badge">●</span>}
+              </div>
+              <div className="profile-email">{userProfile.email || currentUser?.email || 'Email non défini'}</div>
               <div className="profile-status">
                 <span className={`status-text ${userProfile.status || 'offline'}`}>
                   ● {userProfile.status === 'online' ? 'En ligne' : 
-                     userProfile.status === 'away' ? 'Absent' : 'Hors ligne'}
+                     userProfile.status === 'away' ? 'Absent' : 
+                     isOfflineMode ? 'Local' : 'Hors ligne'}
                 </span>
               </div>
             </div>
@@ -1270,7 +1370,7 @@ export default function ChatApp() {
           <div className="search-box">
             <i className="fa-solid fa-magnifying-glass" />
             <input
-              placeholder="Rechercher ou démarrer une discussion"
+              placeholder="Rechercher un contact"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -1352,6 +1452,7 @@ export default function ChatApp() {
               </div>
               <div className="chat-header-info">
                 <div className="chat-header-name">{activeContact.name}</div>
+                <div className="chat-header-email">{activeContact.email || ''}</div>
                 <div className={`chat-header-status ${isTyping ? "typing" : activeContact.status || 'offline'}`}>
                   {isTyping
                     ? "est en train d'écrire..."
@@ -1538,14 +1639,15 @@ export default function ChatApp() {
 
                 <div className="profile-modal-field">
                   <label>Email</label>
-                  <div className="profile-modal-value">{currentUser?.email || 'Non défini'}</div>
+                  <div className="profile-modal-value">{userProfile.email || currentUser?.email || 'Non défini'}</div>
                 </div>
 
                 <div className="profile-modal-field">
                   <label>Statut</label>
                   <div className={`profile-modal-status ${userProfile.status || 'offline'}`}>
                     ● {userProfile.status === 'online' ? 'En ligne' : 
-                       userProfile.status === 'away' ? 'Absent' : 'Hors ligne'}
+                       userProfile.status === 'away' ? 'Absent' : 
+                       isOfflineMode ? 'Local' : 'Hors ligne'}
                   </div>
                 </div>
 
@@ -1609,10 +1711,41 @@ export default function ChatApp() {
                   <div className="profile-edit-actions">
                     <button 
                       className="profile-save-btn"
-                      onClick={updateProfile}
-                      disabled={editingProfile}
+                      onClick={async () => {
+                        // Mise à jour du profil
+                        try {
+                          if (isOnline) {
+                            const { data, error } = await supabase
+                              .from('users')
+                              .update({
+                                name: newUsername,
+                                avatar_url: newAvatar || null
+                              })
+                              .eq('id', currentUser.id)
+                              .select()
+                              .single();
+
+                            if (error) throw error;
+                            if (data) {
+                              setUserProfile(data);
+                              await offlineDB.put(STORES.USERS, data);
+                            }
+                          } else {
+                            // Mise à jour hors ligne
+                            const updated = { ...userProfile, name: newUsername, avatar_url: newAvatar || null };
+                            setUserProfile(updated);
+                            await offlineDB.put(STORES.USERS, updated);
+                          }
+                          setEditingProfile(false);
+                          setShowProfileModal(false);
+                          setNewUsername('');
+                          setNewAvatar('');
+                        } catch (error) {
+                          console.error('Erreur mise à jour:', error);
+                        }
+                      }}
                     >
-                      {editingProfile ? 'Enregistrement...' : 'Enregistrer'}
+                      Enregistrer
                     </button>
                     <button 
                       className="profile-cancel-btn"
