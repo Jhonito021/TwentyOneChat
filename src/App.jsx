@@ -778,7 +778,7 @@ export default function ChatApp() {
         [contactId]: contactMessages
       }));
     }
-  }, [currentUser, isOnline]);
+  }, [currentUser, isOnline,]);
 
   // ─── Obtenir ou créer une conversation ──────────────────────────────────
   const getOrCreateConversation = async (contactId) => {
@@ -942,7 +942,7 @@ export default function ChatApp() {
       await offlineDB.put(STORES.PENDING_MESSAGES, { id: 'pending', messages: pending });
       setSyncStatus('pending');
     }
-  }, [input, activeContact, currentUser, isOnline, pendingMessages]);
+  }, [input, activeContact, currentUser, isOnline, pendingMessages, getOrCreateConversation]);
 
   // ─── Synchroniser les messages en attente ────────────────────────────────
   const syncPendingMessages = useCallback(async () => {
@@ -998,7 +998,7 @@ export default function ChatApp() {
         [activeContact.id]: contactMessages
       }));
     }
-  }, [isOnline, pendingMessages, currentUser, activeContact]);
+  }, [isOnline, pendingMessages, currentUser, activeContact, getOrCreateConversation]);
 
   // ─── Écouter les messages en temps réel ──────────────────────────────────
   useEffect(() => {
@@ -1035,7 +1035,7 @@ export default function ChatApp() {
       .subscribe();
 
     return () => subscription.unsubscribe();
-  }, [currentUser, isOnline, isAuthenticated, activeContact]);
+  }, [currentUser, isOnline, isAuthenticated, activeContact, markMessagesAsRead]);
 
   // ─── Mettre à jour le status ──────────────────────────────────────────────
   useEffect(() => {
